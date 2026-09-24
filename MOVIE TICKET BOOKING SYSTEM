@@ -1,23 +1,239 @@
-class movie:
-    def __init__(self,movie_name:str,total_seats:int,ticket_price:int):
-        self.movie_name=movie_name
-        self.total_seats=total_seats
-        self.ticket_price=ticket_price
-        self.booked_seats=0
-    def book_ticket(self,num_tickets):
-        if num_tickets > self.total_seats:
-            print("sorry seats are not available for your quantity")
-        else:
-            self.booked_seats+=num_tickets
-            self.total_seats-=num_tickets
-            print("your tickets is booked")
-            print(f"please pay, {num_tickets*self.ticket_price}")
+import mysql.connector
+from mysql.connector import Error
 
-    def show_status(self):
-        print(f"Movie name is {self.movie_name}")
-        print(f"seats avialable is {self.total_seats}")
-        print(f"seats booked so far is {self.booked_seats}")
-Movie=movie("MOVIE NAME ","TOTAL TICKETS","PRICE")
+# Database connection handler
+def get_db_connection():
+    try:
+        connection = mysql.connector.connect(
+            host='localhost',
+            user='root',         # Replace with your MySQL username
+            password='01082005Ajay', # Your MySQL password
+            database='movie_db'
+        )
+        return connection
+    except Error as e:
+        print(f"[Error] Failed to connect to MySQL database: {e}")
+        return None
+
+# Class demonstrating complete Encapsulation
+class Movie:
+    def __init__(self, title, total_seats, price):
+        self.__title = title          # Private attribute
+        self.__total_seats = total_seats  # Private attribute
+        self.__price = price          # Private attribute
+
+    # --- Getters ---
+    def get_title(self):
+        return self.__title
+
+    def get_total_seats(self):
+        return self.__total_seats
+
+    def get_price(self):
+        return self.__price
+
+    # --- Setters ---
+    def set_title(self, new_title):
+        if new_title.strip():
+            self.__title = new_title
+        else:
+            print("Title cannot be empty.")
+
+    def set_total_seats(self, new_seats):
+        if new_seats > 0:
+            self.__total_seats = new_seats
+        else:
+            print("Total seats must be a positive integer.")
+
+    def set_price(self, new_price):
+        if new_price > 0:
+            self.__price = new_price
+        else:
+            print("Price must be greater than zero.")
+
+# Admin Operations
+class AdminModule:
+    @staticmethod
+    def add_movie():
+        title = input("Enter movie title: ").strip()
+        try:
+            seats = int(input("Enter total seats: "))
+            price = float(input("Enter ticket price: "))
+        except ValueError:
+            print("[Error] Seats and Price must be valid numbers.")
+            return
+
+        # Instantiate Movie object to enforce encapsulation & validation rules
+        movie = Movie(title, seats, price)
+
+        conn = get_db_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                query = "INSERT INTO movies (title, total_seats, available_seats, price) VALUES (%s, %s, %s, %s)"
+                cursor.execute(query, (movie.get_title(), movie.get_total_seats(), movie.get_total_seats(), movie.get_price()))
+                conn.commit()
+                print(f"Success: '{movie.get_title()}' added to schedule.")
+            except Error as e:
+                print(f"[Database Error] {e}")
+            finally:
+                conn.close()
+
+    @staticmethod
+    def remove_movie():
+        UserModule.view_movies()
+        movie_name = input("\nEnter Movie Name to remove: ").strip()
+
+        if not movie_name:
+            print("[Error] Movie name cannot be empty.")
+            return
+
+        conn = get_db_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                # Search for the movie using exact title match (case-insensitive)
+                cursor.execute("SELECT movie_id, title FROM movies WHERE LOWER(title) = LOWER(%s)", (movie_name,))
+                movie = cursor.fetchone()
+
+                if not movie:
+                    print(f"[Error] No movie found with the name '{movie_name}'.")
+                    return
+
+                movie_id, actual_title = movie
+
+                # Delete movie using retrieved movie_id
+                cursor.execute("DELETE FROM movies WHERE movie_id = %s", (movie_id,))
+                conn.commit()
+                print(f"Success: '{actual_title}' was successfully removed from schedule.")
+            except Error as e:
+                print(f"[Database Error] {e}")
+            finally:
+                conn.close()
+
+    @staticmethod
+    def view_all_bookings():
+        conn = get_db_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                # SQL JOIN query combining Bookings and Movies tables
+                query = """
+                SELECT b.booking_id, b.customer_name, m.title, b.seats_booked, b.total_cost 
+                FROM bookings b
+                JOIN movies m ON b.movie_id = m.movie_id
+                """
+                cursor.execute(query)
+                records = cursor.fetchall()
+
+                print("\n--- All Customer Bookings ---")
+                if not records:
+                    print("No bookings found.")
+                else:
+                    for row in records:
+                        print(f"ID: {row[0]} | Customer: {row[1]} | Movie: {row[2]} | Seats: {row[3]} | Total: ₹{row[4]}")
+            except Error as e:
+                print(f"[Database Error] {e}")
+            finally:
+                conn.close()
+
+# User Operations
+class UserModule:
+    @staticmethod
+    def view_movies():
+        conn = get_db_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT movie_id, title, available_seats, price FROM movies")
+                movies = cursor.fetchall()
+                print("\n--- Available Movies ---")
+                if not movies:
+                    print("No movies currently scheduled.")
+                else:
+                    for m in movies:
+                        print(f"ID: {m[0]} | Title: {m[1]} | Available Seats: {m[2]} | Price: ₹{m[3]}")
+            except Error as e:
+                print(f"[Database Error] {e}")
+            finally:
+                conn.close()
+
+    @staticmethod
+    def book_ticket():
+        UserModule.view_movies()
+        try:
+            movie_id = int(input("\nEnter Movie ID to book: "))
+            requested_seats = int(input("Enter number of seats: "))
+            customer_name = input("Enter your name: ")
+
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT title, available_seats, price FROM movies WHERE movie_id = %s", (movie_id,))
+                movie_data = cursor.fetchone()
+
+                if not movie_data:
+                    print("[Error] Movie not found.")
+                    return
+
+                movie_obj = Movie(movie_data[0], movie_data[1], movie_data[2])
+
+                if movie_obj.get_total_seats() >= requested_seats:
+                    total_cost = movie_obj.get_price() * requested_seats
+                    new_seat_count = movie_obj.get_total_seats() - requested_seats
+
+                    cursor.execute("UPDATE movies SET available_seats = %s WHERE movie_id = %s", (new_seat_count, movie_id))
+                    cursor.execute(
+                        "INSERT INTO bookings (customer_name, movie_id, seats_booked, total_cost) VALUES (%s, %s, %s, %s)",
+                        (customer_name, movie_id, requested_seats, total_cost)
+                    )
+                    conn.commit()
+
+                    print("\n" + "="*35)
+                    print(" BOOKING CONFIRMED")
+                    print(f" Name: {customer_name}")
+                    print(f" Movie: {movie_obj.get_title()}")
+                    print(f" Seats: {requested_seats}")
+                    print(f" Total Paid: ₹{total_cost}")
+                    print("="*35)
+                else:
+                    print(f"[Error] Only {movie_obj.get_total_seats()} seats remaining.")
+        except ValueError:
+            print("[Error] Invalid input. Please enter valid numbers.")
+        except Error as e:
+            print(f"[Database Error] {e}")
+        finally:
+            if conn:
+                conn.close()
+
+# Main Interactive Loop
+def main():
+    while True:
+        print("\n=== MOVIE TICKET BOOKING SYSTEM ===")
+        print("1. User: View & Book Tickets")
+        print("2. Admin: Add Movie")
+        print("3. Admin: Remove Movie")
+        print("4. Admin: View All Bookings")
+        print("5. Exit")
+        
+        choice = input("Select an option (1-5): ")
+
+        if choice == '1':
+            UserModule.book_ticket()
+        elif choice == '2':
+            AdminModule.add_movie()
+        elif choice == '3':
+            AdminModule.remove_movie()
+        elif choice == '4':
+            AdminModule.view_all_bookings()
+        elif choice == '5':
+            print("Exiting application. Goodbye!")
+            break
+        else:
+            print("Invalid option. Try again.")
+
+if __name__ == "__main__":
+    main()
 
 
 
